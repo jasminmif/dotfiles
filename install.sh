@@ -15,6 +15,7 @@ scripts_to_source=(
   "$DOTFILES_PATH/dota_scripts.sh",
   "$DOTFILES_PATH/jasmin_utils.sh"
   # Add more script paths here
+  # "$DOTFILES_PATH/work_utils.sh"
 )
 
 for script_path in "${scripts_to_source[@]}"; do
