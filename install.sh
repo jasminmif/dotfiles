@@ -1,5 +1,11 @@
 #!/bin/bash
 
+bold=$(tput bold)
+yellow=$(tput setaf 3)
+reset=$(tput sgr0)
+
+echo "${yellow}${bold}Dotfile workstation setup scripts${reset}"
+
 ZSHRC_PATH=~/.zshrc
 DOTFILES_PATH=~/dotfiles
 
