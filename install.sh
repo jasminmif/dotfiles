@@ -29,6 +29,27 @@ for script_path in "${scripts_to_source[@]}"; do
   fi
 done
 
+aliases=(
+  "alias gs=\"git status\""
+  "alias gcm=\"gcmsg\""
+  "alias gco-=\"gco -\""
+  "alias gbl=\"git branch --sort=-committerdate\""
+  "alias listening=\"sudo lsof -iTCP -sTCP:LISTEN -n -P\""
+)
+
+add_aliases_to_zshrc() {
+  for alias_line in "${aliases[@]}"; do
+    if ! grep -q "$alias_line" "$ZSHRC_PATH"; then
+      echo "Adding alias: $alias_line"
+      echo "$alias_line" >> "$ZSHRC_PATH"
+    else
+      echo "Alias already exists: $alias_line"
+    fi
+  done
+}
+
+add_aliases_to_zshrc
+
 
 set_dock_orientation_to_left() {
   echo "Set the dock orientation to the left"
