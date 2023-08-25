@@ -13,6 +13,20 @@ install_brew() {
 casks=(
   "rectangle"
   "visual-studio-code"
+  "obsidian"
+  "iterm2"
+  "alfred"
+  "ngrok"
+  "spotify"
+  "blackhole-2ch"
+  "flipper"
+  "steam"
+  "firefox"
+  "opera"
+
+  # "slack"
+  # "ngrok"
+  # "dbeaver-community"
   # Add more casks here
 )
 
