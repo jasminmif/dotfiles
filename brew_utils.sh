@@ -10,7 +10,7 @@ is_brew_installed() {
 }
 
 install_brew() {
-  if ! is_brew_installed then
+  if ! is_brew_installed; then
     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install.sh)" || return $?
   else
     echo "You already have Homebrew installed...good job!"
