@@ -1,8 +1,6 @@
 #!/bin/bash
 
-bold=$(tput bold)
-yellow=$(tput setaf 3)
-reset=$(tput sgr0)
+source ./utils.sh
 
 echo "${yellow}${bold}Dotfile workstation setup scripts${reset}"
 
@@ -50,7 +48,6 @@ add_aliases_to_zshrc() {
 
 add_aliases_to_zshrc
 
-
 set_dock_orientation_to_left() {
   echo "Set the dock orientation to the left"
   defaults write com.apple.dock orientation -string left
@@ -67,6 +64,14 @@ set_prefered_dock_size() {
   defaults write com.apple.dock "tilesize" -int "$tilesize"
 }
 
+remove_all_dock_pinned_apps() {
+  # Disable the Dock
+  defaults write com.apple.dock autohide -bool true
+
+  # Remove all Dock icons
+  defaults write com.apple.dock persistent-apps -array
+}
+
 restart_dock() {
   echo "Restarting the Dock to apply changes"
   killall Dock
@@ -78,6 +83,7 @@ set_mac_dock_config() {
   set_dock_orientation_to_left
   set_dock_auto_hide
   set_prefered_dock_size
+  prompt_and_execute "Do you want to remove all pinned apps from dock?" "remove_all_dock_pinned_apps"
   restart_dock
 }
 
@@ -85,28 +91,11 @@ remmove_all_icons_from_dock() {
   defaults write com.apple.dock persistent-apps -array
 }
 
-print_test_msg() {
-  echo "****Test msg****"
-}
-
 install_brew() {
   if ! command -v brew &>/dev/null; then
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install.sh)" || return $?
   else
     echo "You already have Homebrew installed...good job!"
-  fi
-}
-
-prompt_and_execute() {
-  local prompt_message="$1"
-  local function_to_run="$2"
-  
-  read -p "$prompt_message (y/n): " choice
-
-  if [ "$choice" = "y" ] || [ "$choice" = "Y" ]; then
-    "$function_to_run"
-  else
-    echo "Step skipped..."
   fi
 }
 
