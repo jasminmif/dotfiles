@@ -68,6 +68,14 @@ print_test_msg() {
   echo "****Test msg****"
 }
 
+install_brew() {
+  if ! command -v brew &>/dev/null; then
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+  else
+    echo "You already have Homebrew installed...good job!"
+  fi
+}
+
 prompt_and_execute() {
   local prompt_message="$1"
   local function_to_run="$2"
@@ -77,7 +85,7 @@ prompt_and_execute() {
   if [ "$choice" = "y" ] || [ "$choice" = "Y" ]; then
     "$function_to_run"
   else
-    echo "Function not executed."
+    echo "Step skipped..."
   fi
 }
 
@@ -85,4 +93,9 @@ prompt_set_doc_config() {
   prompt_and_execute "Do you want to set the preferred doc configurations?" "set_mac_dock_config"
 }
 
+prompt_install_brew() {
+  prompt_and_execute "Do you want to install Brew?" "install_brew"
+}
+
 prompt_set_doc_config
+prompt_install_brew
