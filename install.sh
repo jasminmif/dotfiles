@@ -11,7 +11,7 @@ DOTFILES_PATH=~/dotfiles
 source ./dota_scripts.sh
 
 scripts_to_source=(
-  "$DOTFILES_PATH/dota_scripts.sh",
+  "$DOTFILES_PATH/dota_scripts.sh"
   "$DOTFILES_PATH/jasmin_utils.sh"
   # Add more script paths here
   # "$DOTFILES_PATH/work_utils.sh"
