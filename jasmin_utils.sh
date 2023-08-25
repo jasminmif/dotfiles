@@ -1,5 +1,3 @@
-source /Users/jasminmiftari/hot_corners.sh
-
 scroll_up() {
   adb shell input swipe 500 500 1000 3800
 }
