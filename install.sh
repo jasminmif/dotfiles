@@ -1,6 +1,7 @@
 #!/bin/bash
 
 source ./utils.sh
+source ./brew_utils.sh
 
 echo "${yellow}${bold}Dotfile workstation setup scripts${reset}"
 
@@ -91,21 +92,14 @@ remmove_all_icons_from_dock() {
   defaults write com.apple.dock persistent-apps -array
 }
 
-install_brew() {
-  if ! command -v brew &>/dev/null; then
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install.sh)" || return $?
-  else
-    echo "You already have Homebrew installed...good job!"
-  fi
-}
-
 prompt_set_doc_config() {
   prompt_and_execute "Do you want to set the preferred doc configurations?" "set_mac_dock_config"
 }
 
-prompt_install_brew() {
+prompt_install_brew_and_casks() {
   prompt_and_execute "Do you want to install Brew?" "install_brew"
+  prompt_and_execute "Do you want to install Brew casks and formula?" "install_brew_cask_formula"
 }
 
 prompt_set_doc_config
-prompt_install_brew
+prompt_install_brew_and_casks
