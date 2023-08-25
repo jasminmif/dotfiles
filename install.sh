@@ -98,6 +98,11 @@ prompt_set_doc_config() {
 
 prompt_install_brew_and_casks() {
   prompt_and_execute "Do you want to install Brew?" "install_brew"
+  
+  if ! is_brew_installed; then
+    return
+  fi
+
   prompt_and_execute "Do you want to install Brew casks and formula?" "install_brew_cask_formula"
 }
 
