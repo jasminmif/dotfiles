@@ -35,3 +35,11 @@ scroll_up_down() {
 gnbuildalert() {
   gnbuild && afplay /System/Library/PrivateFrameworks/ScreenReader.framework/Versions/A/Resources/Sounds/AnimationFlyToDownloads.aiff &
 }
+
+open_sim_link() {
+  xcrun simctl openurl booted "guildeddev://localhost:8000/?r=lo4PRzmR"
+}
+
+adb_reverse() {
+  adb reverse tcp:8081 tcp:8081
+}
