@@ -30,6 +30,7 @@ done
 
 aliases=(
   "alias gs=\"git status\""
+  "alias gd=\"git diff\""
   "alias gcm=\"gcmsg\""
   "alias gco-=\"gco -\""
   "alias gbl=\"git branch --sort=-committerdate\""

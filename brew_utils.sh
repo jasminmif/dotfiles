@@ -12,6 +12,11 @@ is_brew_installed() {
 install_brew() {
   if ! is_brew_installed; then
     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install.sh)" || return $?
+
+    if [ -e /opt/homebrew/bin/brew ]; then
+      echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
+      eval "$(/opt/homebrew/bin/brew shellenv)"
+    fi
   else
     echo "You already have Homebrew installed...good job!"
   fi
