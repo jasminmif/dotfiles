@@ -1,3 +1,5 @@
+alias listening="sudo lsof -iTCP -sTCP:LISTEN -n -P"
+
 scroll_up() {
   adb shell input swipe 500 500 1000 3800
 }
@@ -42,4 +44,18 @@ open_sim_link() {
 
 adb_reverse() {
   adb reverse tcp:8081 tcp:8081
+}
+
+jgnbuild() {
+  ggn &&
+    node \
+      --max_old_space_size=12138 \
+      --stack_size=4096 \
+      ./node_modules/webpack/bin/webpack.js \
+      --config ./webpack.config.js "$@"
+}
+
+jgndev() {
+  ggn &&
+    NODE_OPTIONS="--max-old-space-size=8096" npx react-native webpack-start "$@"
 }
