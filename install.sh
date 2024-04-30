@@ -110,3 +110,8 @@ prompt_install_brew_and_casks() {
 prompt_set_doc_config
 prompt_install_brew_and_casks
 add_zsh_plugin_if_not_exists 'z'
+
+mac_set_show_hidden_files_to_true() {
+  defaults write com.apple.Finder AppleShowAllFiles true
+}
+mac_set_show_hidden_files_to_true
