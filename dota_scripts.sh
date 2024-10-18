@@ -1,11 +1,13 @@
 setBottomMissionControl() {
   defaults write com.apple.dock wvous-br-corner -int 2
+  defaults write com.apple.dock wvous-bl-corner -int 2
   killall Dock
   echo "+ Bottom right set to Mission Control"
 }
 
 removeAllMissionControlConfigs() {
   defaults write com.apple.dock wvous-br-corner -int 0
+  defaults write com.apple.dock wvous-bl-corner -int 0
   killall Dock
   echo "- Removed all hot corners"
 }
