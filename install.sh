@@ -36,6 +36,7 @@ aliases=(
   "alias gbl=\"git branch --sort=-committerdate\""
   "alias listening=\"sudo lsof -iTCP -sTCP:LISTEN -n -P\""
   "alias grhH=\"git reset --hard HEAD\""
+  "alias dc=\"docker-compose\""
 )
 
 add_aliases_to_zshrc() {
