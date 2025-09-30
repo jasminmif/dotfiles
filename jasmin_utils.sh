@@ -47,15 +47,33 @@ adb_reverse() {
 }
 
 jgnbuild() {
-  ggn &&
-    node \
-      --max_old_space_size=12138 \
-      --stack_size=4096 \
-      ./node_modules/webpack/bin/webpack.js \
-      --config ./webpack.config.js "$@"
+  ggn
+  if [[ "$PLATFORM" == "android" ]]; then
+    WEBPACK_VERBOSE=$verbose yarn run bundle-android "$@"
+  else
+    WEBPACK_VERBOSE=$verbose yarn run bundle-ios "$@"
+  fi
 }
 
 jgndev() {
-  ggn &&
-    NODE_OPTIONS="--max-old-space-size=8096" npx react-native webpack-start "$@"
+  ggn && yarn run start-dev-server "$@"
+}
+
+jgndevandroid() {
+  export ANDROID_HOME="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
+  export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}"
+  export ANDROID_AVD_HOME="${ANDROID_AVD_HOME:-$HOME/.android/avd}"
+
+  emulator_avd_name="$($ANDROID_SDK_ROOT/emulator/emulator -list-avds | sed -n '2 p')"
+  echo -e "${YELLOW}[guilded_profile.sh]${RESET_COLOR}📱 Starting Default Android Emulator with AVD name: ${CYAN}$emulator_avd_name${RESET_COLOR}
+  ${LIGHT_GRAY}(this is just the first one in your AVD list; you can change this by reorganizing your list in Android Studio)${RESET_COLOR}"
+    $ANDROID_SDK_ROOT/emulator/emulator -avd "$emulator_avd_name" &
+
+  ggn
+  echo -e "${YELLOW}[guilded_profile.sh]${RESET_COLOR} Uninstalling previous build of app" &&
+    adb shell "pm uninstall com.guilded.guildedapp.debug" >/dev/null
+  echo -e "${YELLOW}[guilded_profile.sh]${RESET_COLOR} Clearing previous install data" &&
+    adb shell "rm -rf /data/app/com.guilded.guildedapp.debug*" >/dev/null
+
+  ./node_modules/.bin/react-native run-android --appIdSuffix debug --active-arch-only "$@"
 }
