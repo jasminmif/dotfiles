@@ -45,6 +45,7 @@ casks=(
 
 # List of formulas to install
 formulas=(
+  "fzf"
 #   "git"
 #   "node"
   # Add more formulas here

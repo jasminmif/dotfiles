@@ -33,7 +33,7 @@ aliases=(
   "alias gd=\"git diff\""
   "alias gcm=\"gcmsg\""
   "alias gco-=\"gco -\""
-  "alias gbl=\"git branch --sort=-committerdate\""
+  "alias gbl=\"git branch --sort=-committerdate | fzf --height 40% --reverse --ansi | sed 's/^[* ]*//' | xargs -I {} git checkout {}\""
   "alias listening=\"sudo lsof -iTCP -sTCP:LISTEN -n -P\""
   "alias grhH=\"git reset --hard HEAD\""
   "alias dc=\"docker compose\""

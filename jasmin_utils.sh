@@ -77,3 +77,32 @@ jgndevandroid() {
 
   ./node_modules/.bin/react-native run-android --appIdSuffix debug --active-arch-only "$@"
 }
+
+ros_path="$HOME/GitHub/ros"
+
+ros() {
+  cd "$ros_path" || return
+}
+
+gpull() {
+  ros
+  BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+  if [ "$BRANCH" = "main" ]; then
+    git pull --tags
+  else
+    git pull --tags --rebase origin main
+  fi
+}
+
+rdev() {
+  ros
+  npm run dev -- default api,web 
+}
+
+rmigrate() {
+  npm run api db:migrate
+}
+
+rrollback() {
+  npm run api db:rollback
+}
