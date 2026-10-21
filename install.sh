@@ -29,7 +29,7 @@ for script_path in "${scripts_to_source[@]}"; do
 done
 
 aliases=(
-  "alias -='cd -'"
+  "alias -- -='cd -'"
   "alias ...='cd ../..'"
   "alias ....='cd ../../..'"
   "alias .....='cd ../../../..'"
@@ -50,12 +50,7 @@ aliases=(
 
 add_aliases_to_zshrc() {
   for alias_line in "${aliases[@]}"; do
-    if ! grep -q "$alias_line" "$ZSHRC_PATH"; then
-      echo "Adding alias: $alias_line"
-      echo "$alias_line" >> "$ZSHRC_PATH"
-    else
-      echo "Alias already exists: $alias_line"
-    fi
+    add_line_to_zshrc_if_not_exists "$alias_line"
   done
 }
 
@@ -120,7 +115,7 @@ prompt_install_brew_and_casks() {
 
 prompt_set_doc_config
 prompt_install_brew_and_casks
-add_zsh_plugin_if_not_exists 'z'
+install_oh_my_zsh
 
 mac_set_show_hidden_files_to_true() {
   defaults write com.apple.Finder AppleShowAllFiles true

@@ -20,13 +20,31 @@ print_test_msg() {
   echo "****Test msg****"
 }
 
-add_zsh_plugin_if_not_exists() {
-  plugin_name="$1"
-  if grep -q "plugins=([^)]*${plugin_name}[^)]*)" "$ZSHRC_PATH"; then
-    echo "Plugin '$plugin_name' is already in the plugins array."
+add_line_to_zshrc_if_not_exists() {
+  local line="$1"
+  # -xF: match the whole line literally, so lines with regex characters aren't added twice
+  if grep -qxF "$line" "$ZSHRC_PATH"; then
+    echo "Already in $ZSHRC_PATH: $line"
   else
-    # Add the plugin to the plugins array
-    sed -i.bak '/^plugins=(/ s/)/ '"$plugin_name"')/' "$ZSHRC_PATH"
-    echo "Plugin '$plugin_name' has been added to the plugins array in your ~/.zshrc file."
+    echo "$line" >> "$ZSHRC_PATH"
+    echo "Added to $ZSHRC_PATH: $line"
+  fi
+}
+
+install_oh_my_zsh() {
+  if [ -d "$HOME/.oh-my-zsh" ]; then
+    echo "Oh My Zsh is already installed."
+  else
+    # Clone instead of running the official installer, which would replace ~/.zshrc
+    git clone --depth=1 https://github.com/ohmyzsh/ohmyzsh.git "$HOME/.oh-my-zsh" || return $?
+  fi
+
+  # Oh My Zsh has to load first, so it goes at the top of ~/.zshrc
+  local line="source $DOTFILES_PATH/oh_my_zsh.sh"
+  if grep -qxF "$line" "$ZSHRC_PATH"; then
+    echo "Already in $ZSHRC_PATH: $line"
+  else
+    { echo "$line"; cat "$ZSHRC_PATH"; } > "$ZSHRC_PATH.tmp" && mv "$ZSHRC_PATH.tmp" "$ZSHRC_PATH"
+    echo "Added to the top of $ZSHRC_PATH: $line"
   fi
 }
