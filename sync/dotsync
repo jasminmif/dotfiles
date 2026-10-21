@@ -663,9 +663,24 @@ def cmd_track(args):
         say(f"Added {len(lines)} setting(s) to sync/tracked.conf. Run `dotsync push` to share them.")
 
 
+class HelpFormatter(argparse.RawDescriptionHelpFormatter):
+    """Lists the commands directly, without argparse's `{push,pull,...}` line above them."""
+
+    def _format_action(self, action):
+        if isinstance(action, argparse._SubParsersAction):
+            return "".join(self._format_action(command) for command in action._get_subactions())
+        return super()._format_action(action)
+
+
 def main():
-    parser = argparse.ArgumentParser(prog="dotsync", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    commands = parser.add_subparsers(dest="command", required=True)
+    parser = argparse.ArgumentParser(
+        prog="dotsync",
+        usage="dotsync <command> [options]",
+        description="Keep macOS and app settings in sync across your Macs through this dotfiles repo.",
+        epilog="What gets synced is listed in sync/tracked.conf.",
+        formatter_class=HelpFormatter,
+    )
+    commands = parser.add_subparsers(dest="command", title="commands", metavar="<command>")
     push = commands.add_parser("push", help="save this Mac's settings and push them to main")
     pull = commands.add_parser("pull", help="get main's settings and apply them here")
     for command in (push, pull):
@@ -673,7 +688,11 @@ def main():
     commands.add_parser("apply", help="apply configs/ to this Mac without touching git")
     commands.add_parser("status", help="show this Mac's settings that differ from the repo")
     commands.add_parser("track", help="find and track a setting you're about to change")
+    parser._action_groups.insert(0, parser._action_groups.pop())  # list commands before options
     args = parser.parse_args()
+    if not args.command:
+        parser.print_help()
+        return
     sys.stdout.reconfigure(line_buffering=True)  # keep our output in order with git/claude output
     if sys.platform != "darwin":
         die("dotsync only runs on macOS.")
