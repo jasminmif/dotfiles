@@ -37,6 +37,7 @@ aliases=(
   "alias listening=\"sudo lsof -iTCP -sTCP:LISTEN -n -P\""
   "alias grhH=\"git reset --hard HEAD\""
   "alias dc=\"docker compose\""
+  "alias dotsync=\"$(pwd)/sync/dotsync\""
 )
 
 add_aliases_to_zshrc() {

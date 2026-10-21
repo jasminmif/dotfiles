@@ -1,0 +1,688 @@
+#!/usr/bin/env python3
+"""dotsync: keep macOS and app settings in sync across Macs through this dotfiles repo.
+
+  dotsync push      save this Mac's settings into configs/, commit and push
+  dotsync pull      get the latest settings from main and apply them here
+  dotsync apply     apply what's in configs/ without touching git
+  dotsync status    show which of this Mac's settings differ from the repo
+  dotsync track     find the key behind a setting you change, and start tracking it
+
+What gets synced is listed in sync/tracked.conf.
+"""
+
+import argparse
+import base64
+import datetime
+import hashlib
+import json
+import os
+import plistlib
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+HOME = Path.home()
+SYNC_DIR = Path(__file__).resolve().parent
+REPO = SYNC_DIR.parent
+CONFIGS = REPO / "configs"
+TRACKED = SYNC_DIR / "tracked.conf"
+MACKUP_CFG = SYNC_DIR / ".mackup.cfg"  # generated from tracked.conf, gitignored
+MACKUP_DIR = CONFIGS / "mackup"
+# Remembers that this Mac has synced before, so a fresh Mac takes main's settings
+# instead of pushing its factory defaults over them.
+STATE_FILE = HOME / ".local/state/dotsync" / (hashlib.sha1(str(REPO).encode()).hexdigest()[:12] + ".json")
+
+# Paths dotsync is allowed to commit; anything else dirty in the repo stops a sync.
+OWNED_PATHS = ("configs/", "sync/tracked.conf")
+
+# Processes that must restart before a changed preference domain takes effect.
+RESTART_FOR_DOMAIN = {
+    "com.apple.dock": "Dock",
+    "com.apple.finder": "Finder",
+    "com.apple.screencapture": "SystemUIServer",
+    "com.apple.menuextra.clock": "SystemUIServer",
+}
+ACTIVATE_SETTINGS = "/System/Library/PrivateFrameworks/SystemAdministration.framework/Resources/activateSettings"
+
+SECRET_RE = re.compile(
+    r"sk-ant-[A-Za-z0-9_-]{16,}"
+    r"|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_\w{20,}"
+    r"|AKIA[0-9A-Z]{16}"
+    r"|xox[abprs]-[A-Za-z0-9-]{10,}"
+    r"|-----BEGIN [A-Z ]*PRIVATE KEY-----"
+    r"""|["']?\w*(api[_-]?key|token|secret|password)\w*["']?\s*[:=]\s*["']?[A-Za-z0-9_\-./+=]{16,}""",
+    re.IGNORECASE,
+)
+CONFLICT_MARKER_RE = re.compile(r"^(<{7}|={7}|>{7})( |$)", re.MULTILINE)
+
+if sys.stdout.isatty():
+    BOLD, GREEN, YELLOW, RED, DIM, RESET = "\033[1m", "\033[32m", "\033[33m", "\033[31m", "\033[2m", "\033[0m"
+else:
+    BOLD = GREEN = YELLOW = RED = DIM = RESET = ""
+
+
+def say(msg):
+    print(f"{GREEN}==>{RESET} {BOLD}{msg}{RESET}")
+
+
+def warn(msg):
+    print(f"{YELLOW}warning:{RESET} {msg}")
+
+
+def die(msg):
+    print(f"{RED}error:{RESET} {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def ask(prompt, default=False):
+    hint = "[Y/n]" if default else "[y/N]"
+    answer = input(f"{prompt} {hint} ").strip().lower()
+    return default if not answer else answer in ("y", "yes")
+
+
+def run(cmd, check=True, **kwargs):
+    result = subprocess.run(cmd, capture_output=True, text=True, **kwargs)
+    if check and result.returncode != 0:
+        die(f"`{' '.join(cmd)}` failed:\n{result.stderr.strip() or result.stdout.strip()}")
+    return result
+
+
+def git(*args, check=True):
+    return run(["git", "-C", str(REPO), *args], check=check)
+
+
+def computer_name():
+    return run(["scutil", "--get", "ComputerName"], check=False).stdout.strip() or os.uname().nodename
+
+
+# --- tracked.conf ---------------------------------------------------------------
+
+
+class Tracked:
+    def __init__(self):
+        self.defaults = []  # (domain, key, current_host)
+        self.json = []  # (app, file relative to ~, dotted key)
+        self.mackup = []  # mackup app names
+
+    @classmethod
+    def load(cls):
+        tracked = cls()
+        for number, raw in enumerate(TRACKED.read_text().splitlines(), 1):
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = shlex.split(line)
+            kind = parts[0]
+            if kind in ("defaults", "defaults-host") and len(parts) == 3:
+                tracked.defaults.append((normalize_domain(parts[1]), parts[2], kind == "defaults-host"))
+            elif kind == "json" and len(parts) == 4:
+                tracked.json.append((parts[1], parts[2], parts[3]))
+            elif kind == "mackup" and len(parts) == 2:
+                tracked.mackup.append(parts[1])
+            else:
+                die(f"{TRACKED.relative_to(REPO)} line {number}: can't understand `{line}`")
+        return tracked
+
+    def defaults_by_domain(self):
+        grouped = {}
+        for domain, key, current_host in self.defaults:
+            grouped.setdefault((domain, current_host), []).append(key)
+        return grouped
+
+    def json_by_app(self):
+        grouped = {}
+        for app, file, key in self.json:
+            grouped.setdefault(app, {}).setdefault(file, []).append(key)
+        return grouped
+
+
+def normalize_domain(domain):
+    return "NSGlobalDomain" if domain in ("-g", "-globalDomain", "NSGlobalDomain") else domain
+
+
+# --- macOS defaults -------------------------------------------------------------
+
+
+def defaults_cmd(current_host):
+    return ["defaults", "-currentHost"] if current_host else ["defaults"]
+
+
+def read_domain(domain, current_host=False):
+    result = subprocess.run([*defaults_cmd(current_host), "export", domain, "-"], capture_output=True)
+    if result.returncode != 0 or not result.stdout.strip():
+        return {}
+    try:
+        return plistlib.loads(result.stdout)
+    except Exception:
+        return {}
+
+
+def write_domain(domain, current_host, values):
+    tmp = STATE_FILE.parent / f"import-{os.getpid()}.plist"
+    tmp.parent.mkdir(parents=True, exist_ok=True)
+    tmp.write_bytes(plistlib.dumps(values, fmt=plistlib.FMT_BINARY))
+    try:
+        run([*defaults_cmd(current_host), "import", domain, str(tmp)])
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def to_json(value):
+    """plist values -> JSON-safe values (data and dates get a small wrapper)."""
+    if isinstance(value, bytes):
+        return {"$data": base64.b64encode(value).decode()}
+    if isinstance(value, datetime.datetime):
+        return {"$date": value.isoformat()}
+    if isinstance(value, dict):
+        return {k: to_json(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [to_json(v) for v in value]
+    return value
+
+
+def from_json(value):
+    if isinstance(value, dict):
+        if set(value) == {"$data"}:
+            return base64.b64decode(value["$data"])
+        if set(value) == {"$date"}:
+            return datetime.datetime.fromisoformat(value["$date"])
+        return {k: from_json(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [from_json(v) for v in value]
+    return value
+
+
+def same_value(a, b):
+    # 1 == True in Python, but a plist bool and int are different settings.
+    return type(a) is type(b) and a == b
+
+
+def domain_file(domain, current_host):
+    return CONFIGS / "macos" / (f"{domain}.currentHost.json" if current_host else f"{domain}.json")
+
+
+def write_json_file(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = json.dumps(data, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+    if not path.exists() or path.read_text() != text:
+        path.write_text(text)
+
+
+def capture_defaults(tracked):
+    written = set()
+    for (domain, current_host), keys in tracked.defaults_by_domain().items():
+        current = read_domain(domain, current_host)
+        # null means "not set on this Mac" (macOS default), and applying it removes the key.
+        values = {key: to_json(current[key]) if key in current else None for key in keys}
+        path = domain_file(domain, current_host)
+        write_json_file(path, values)
+        written.add(path)
+    remove_untracked(CONFIGS / "macos", written)
+
+
+def apply_defaults(tracked):
+    restart, needs_activate = set(), False
+    for (domain, current_host), keys in tracked.defaults_by_domain().items():
+        path = domain_file(domain, current_host)
+        if not path.exists():
+            continue
+        wanted = json.loads(path.read_text())
+        current = read_domain(domain, current_host)
+        updated, changes = dict(current), []
+        for key in keys:
+            if key not in wanted:
+                continue
+            value = from_json(wanted[key])
+            if value is None:
+                if key in updated:
+                    del updated[key]
+                    changes.append(f"{key} (reset to default)")
+            elif key not in current or not same_value(current[key], value):
+                updated[key] = value
+                changes.append(f"{key} = {json.dumps(wanted[key])}")
+        if not changes:
+            continue
+        write_domain(domain, current_host, updated)
+        for change in changes:
+            print(f"  {domain}: {change}")
+        process = RESTART_FOR_DOMAIN.get(domain.lower())
+        if process:
+            restart.add(process)
+        elif domain == "NSGlobalDomain" or "multitouch" in domain.lower() or "keyboard" in domain.lower():
+            needs_activate = True
+
+    for process in sorted(restart):
+        subprocess.run(["killall", process], capture_output=True)
+    if needs_activate:
+        if os.path.exists(ACTIVATE_SETTINGS):
+            subprocess.run([ACTIVATE_SETTINGS, "-u"], capture_output=True)
+        print(f"  {DIM}Some settings (mouse/trackpad speed, keyboard) only take effect after you log out and back in.{RESET}")
+
+
+def remove_untracked(folder, keep):
+    if folder.exists():
+        for path in folder.glob("*.json"):
+            if path not in keep:
+                path.unlink()
+
+
+# --- single keys inside app JSON files -----------------------------------------
+
+
+def json_get(data, dotted):
+    node = data
+    for part in dotted.split("."):
+        if not isinstance(node, dict) or part not in node:
+            return False, None
+        node = node[part]
+    return True, node
+
+
+def json_set(data, dotted, value):
+    parts = dotted.split(".")
+    node = data
+    for part in parts[:-1]:
+        node = node.setdefault(part, {})
+    if value is None:
+        node.pop(parts[-1], None)
+    else:
+        node[parts[-1]] = value
+
+
+def load_app_json(path):
+    try:
+        return json.loads(path.read_text())
+    except FileNotFoundError:
+        return {}
+    except json.JSONDecodeError:
+        die(f"{path} isn't valid JSON; not touching it.")
+
+
+def capture_json(tracked):
+    written = set()
+    for app, files in tracked.json_by_app().items():
+        snapshot = {}
+        for file, keys in files.items():
+            data = load_app_json(HOME / file)
+            snapshot[file] = {key: json_get(data, key)[1] for key in keys}
+        path = CONFIGS / "apps" / f"{app}.json"
+        write_json_file(path, snapshot)
+        written.add(path)
+    remove_untracked(CONFIGS / "apps", written)
+
+
+def apply_json(tracked):
+    for app, files in tracked.json_by_app().items():
+        path = CONFIGS / "apps" / f"{app}.json"
+        if not path.exists():
+            continue
+        wanted = json.loads(path.read_text())
+        changed = False
+        for file, keys in files.items():
+            target = HOME / file
+            data = load_app_json(target)
+            file_changed = False
+            for key in keys:
+                if key not in wanted.get(file, {}):
+                    continue
+                value = wanted[file][key]
+                found, current = json_get(data, key)
+                if (value is None and found) or (value is not None and (not found or current != value)):
+                    json_set(data, key, value)
+                    file_changed = changed = True
+                    print(f"  {app}: {key} = {json.dumps(value)}")
+            if file_changed:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(json.dumps(data, indent=2) + "\n")
+        if changed and subprocess.run(["pgrep", "-xq", app]).returncode == 0:
+            print(f"  {DIM}{app} is open: restart it to pick up the change.{RESET}")
+
+
+# --- Mackup (whole app config files) -------------------------------------------
+
+
+def mackup(tracked, action):
+    if not tracked.mackup:
+        return
+    if not shutil.which("mackup"):
+        warn("Mackup isn't installed (brew install mackup); skipping app config files.")
+        return
+    try:
+        storage = REPO.relative_to(HOME)
+    except ValueError:
+        die("Mackup needs the dotfiles repo to be inside your home folder.")
+    MACKUP_CFG.write_text(
+        "[storage]\nengine = file_system\n"
+        f"path = {storage}\ndirectory = {MACKUP_DIR.relative_to(REPO)}\n\n"
+        "[applications_to_sync]\n" + "\n".join(tracked.mackup) + "\n"
+    )
+    MACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    result = run(["mackup", "-c", str(MACKUP_CFG), "--force", action], check=False)
+    if result.returncode != 0:
+        die(f"mackup {action} failed:\n{result.stderr.strip() or result.stdout.strip()}")
+
+    prefs = sorted(MACKUP_DIR.glob("Library/Preferences/*.plist"))
+    if action == "backup":
+        # Binary plists can't be diffed or merged; store them as XML.
+        for plist in sorted(MACKUP_DIR.rglob("*.plist")):
+            subprocess.run(["plutil", "-convert", "xml1", str(plist)], capture_output=True)
+    else:
+        # Mackup copied the files, but macOS caches preferences in memory and would
+        # write the old values back. Importing goes through that cache.
+        for plist in prefs:
+            subprocess.run(["defaults", "import", plist.stem, str(plist)], capture_output=True)
+        print(f"  App config files restored for: {', '.join(tracked.mackup)}")
+        print(f"  {DIM}Restart those apps if they're open.{RESET}")
+
+
+# --- capture / apply ------------------------------------------------------------
+
+
+def capture(tracked):
+    say("Reading this Mac's settings")
+    capture_defaults(tracked)
+    capture_json(tracked)
+    mackup(tracked, "backup")
+
+
+def apply(tracked):
+    say("Applying settings to this Mac")
+    apply_defaults(tracked)
+    apply_json(tracked)
+    mackup(tracked, "restore")
+    save_state()
+
+
+def save_state():
+    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    STATE_FILE.write_text(json.dumps({"commit": git("rev-parse", "HEAD").stdout.strip(), "at": datetime.datetime.now().isoformat()}))
+
+
+# --- git ------------------------------------------------------------------------
+
+
+def main_branch():
+    result = git("symbolic-ref", "--short", "refs/remotes/origin/HEAD", check=False)
+    return result.stdout.strip().split("/", 1)[1] if result.returncode == 0 else "main"
+
+
+def preflight():
+    branch, main = git("branch", "--show-current").stdout.strip(), main_branch()
+    if branch != main:
+        die(f"dotsync syncs the {main} branch; you're on `{branch}`. Run `git -C {REPO} switch {main}` first.")
+    if (REPO / ".git" / "MERGE_HEAD").exists():
+        die(f"A git merge is already in progress in {REPO}. Finish it or run `git merge --abort`.")
+    other = [line for line in git("status", "--porcelain").stdout.splitlines() if not line[3:].startswith(OWNED_PATHS)]
+    if other:
+        die("The dotfiles repo has other uncommitted changes. Commit or stash them first:\n" + "\n".join(other))
+    return main
+
+
+def commit_local(message):
+    git("add", "-A", "--", *OWNED_PATHS)
+    if git("diff", "--cached", "--quiet", check=False).returncode == 0:
+        return False
+    check_for_secrets()
+    git("commit", "-q", "-m", message)
+    return True
+
+
+def check_for_secrets():
+    hits, file = [], None
+    for line in git("diff", "--cached", "-U0", "--no-color").stdout.splitlines():
+        if line.startswith("+++ "):
+            file = line[6:]
+        elif line.startswith("+") and SECRET_RE.search(line):
+            hits.append(f"  {file}: {line[1:].strip()[:60]}…")
+    if not hits:
+        return
+    warn("These lines look like passwords or tokens, and your dotfiles repo is public:")
+    print("\n".join(hits[:20]))
+    if not ask("Commit them anyway?"):
+        git("reset", "-q")
+        die("Nothing committed. Remove the setting from sync/tracked.conf (or the file from the app), then try again.")
+
+
+def merge_main(main):
+    """Merge origin/main into this Mac's commits. Returns how conflicts were settled, if any."""
+    say(f"Getting the latest settings from {main}")
+    git("fetch", "-q", "origin", main)
+    result = git("merge", "--no-edit", "-q", f"origin/{main}", check=False)
+    if result.returncode == 0:
+        return None
+    conflicts = git("diff", "--name-only", "--diff-filter=U").stdout.split()
+    if not conflicts:
+        die(f"git merge failed:\n{result.stderr.strip() or result.stdout.strip()}")
+    return resolve_conflicts(conflicts, main)
+
+
+def resolve_conflicts(files, main):
+    while True:
+        warn(f"This Mac and {main} changed the same settings:")
+        for file in files:
+            print(f"  {file}")
+        print(f"\n{DIM}" + git("--no-pager", "diff", "--no-color", "--", *files).stdout[:4000] + RESET)
+        print(f"  {BOLD}1{RESET}) Keep this Mac's settings")
+        print(f"  {BOLD}2{RESET}) Take {main}'s settings")
+        print(f"  {BOLD}3{RESET}) Merge both with Claude")
+        print(f"  {BOLD}q{RESET}) Cancel (nothing changes)")
+        choice = input("Choose 1, 2, 3 or q: ").strip().lower()
+        if choice in ("1", "2"):
+            git("checkout", "--ours" if choice == "1" else "--theirs", "--", *files)
+            git("add", "--", *files)
+            git("commit", "-q", "--no-edit")
+            return "ours" if choice == "1" else "theirs"
+        if choice == "3" and merge_with_claude(files, main):
+            git("add", "--", *files)
+            git("commit", "-q", "--no-edit")
+            return "claude"
+        if choice == "q":
+            git("merge", "--abort")
+            die("Cancelled. Your settings and the repo are as they were before the merge.")
+
+
+def find_claude():
+    for candidate in (shutil.which("claude"), HOME / ".claude/local/claude", HOME / ".local/bin/claude"):
+        if candidate and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return None
+
+
+def merge_with_claude(files, main):
+    claude = find_claude()
+    if not claude:
+        warn("Claude Code isn't installed. Install it, then choose 3 again:")
+        print("  curl -fsSL https://claude.ai/install.sh | bash")
+        return False
+
+    say("Asking Claude to merge the conflicting settings")
+    prompt = f"""You're resolving git merge conflicts in a dotfiles repo that syncs macOS and app settings between Macs.
+"ours" / HEAD is this Mac's settings. "theirs" / origin/{main} is what the user's other Macs pushed.
+
+Conflicted files:
+{chr(10).join('- ' + f for f in files)}
+
+For each file, remove every conflict marker and write a merged version that keeps the settings changed on either side.
+If both sides set the same setting to different values, keep this Mac's value (ours).
+Files must stay valid: JSON must parse, plist XML must be well-formed. Only edit the files listed above.
+When you're done, print a short list of the settings where both sides disagreed and which value you kept."""
+    result = subprocess.run(
+        [claude, "-p", prompt, "--permission-mode", "acceptEdits", "--allowedTools", "Read,Edit,Write"],
+        cwd=REPO,
+    )
+
+    problems = [] if result.returncode == 0 else [f"claude exited with code {result.returncode}"]
+    for file in files:
+        path = REPO / file
+        text = path.read_text(errors="replace") if path.exists() else ""
+        if CONFLICT_MARKER_RE.search(text):
+            problems.append(f"{file} still has conflict markers")
+        elif file.endswith(".json"):
+            try:
+                json.loads(text)
+            except json.JSONDecodeError as error:
+                problems.append(f"{file} isn't valid JSON ({error})")
+        elif file.endswith(".plist"):
+            try:
+                plistlib.loads(path.read_bytes())
+            except Exception as error:
+                problems.append(f"{file} isn't a valid plist ({error})")
+    if problems:
+        warn("Claude's merge didn't work out:\n  " + "\n  ".join(problems))
+        git("checkout", "--merge", "--", *files)
+        return False
+
+    print(f"\n{BOLD}What the merge changes compared with {main}:{RESET}")
+    print(git("--no-pager", "diff", "--no-color", "MERGE_HEAD", "--", *files).stdout[:4000] or "  (nothing)")
+    if ask("Use this merge?", default=True):
+        return True
+    git("checkout", "--merge", "--", *files)
+    return False
+
+
+def commits_ahead(main):
+    return int(git("rev-list", "--count", f"origin/{main}..HEAD").stdout.strip() or 0)
+
+
+def differs_from_main(main):
+    return git("diff", "--quiet", f"origin/{main}", "HEAD", "--", *OWNED_PATHS, check=False).returncode != 0
+
+
+# --- commands -------------------------------------------------------------------
+
+
+def cmd_push(args):
+    main = preflight()
+    tracked = Tracked.load()
+    if not STATE_FILE.exists():
+        print(f"This Mac hasn't synced yet. Pushing now would replace the settings on {main} with this Mac's.")
+        if ask(f"Pull {main}'s settings first instead?", default=True):
+            return cmd_pull(args)
+
+    capture(tracked)
+    commit_local(f"dotsync: settings from {computer_name()}")
+    before = git("rev-parse", "HEAD").stdout.strip()
+    merge_main(main)
+    if git("rev-parse", "HEAD").stdout.strip() != before and not args.no_apply:
+        apply(tracked)
+
+    if commits_ahead(main) == 0:
+        save_state()
+        say(f"Nothing new to push; {main} already has this Mac's settings.")
+        return
+    say(f"Pushing to {main}")
+    git("push", "-q", "origin", f"HEAD:{main}")
+    save_state()
+    say("Done. Run `dotsync pull` on your other Macs to get these settings.")
+
+
+def cmd_pull(args):
+    main = preflight()
+    tracked = Tracked.load()
+    if STATE_FILE.exists():
+        # Save local changes as a commit first, so git can merge them with main
+        # instead of the pull silently overwriting them.
+        capture(tracked)
+        commit_local(f"dotsync: local changes on {computer_name()}")
+    else:
+        say(f"First sync on this Mac: using the settings from {main}")
+
+    resolution = merge_main(main)
+    if args.no_apply:
+        say("Skipped applying (--no-apply).")
+    else:
+        apply(tracked)
+
+    if resolution == "claude":
+        say("Claude merged the settings. Run `dotsync push` to sync the merged settings to your other Macs.")
+    elif differs_from_main(main):
+        say(f"This Mac has settings {main} doesn't have yet. Run `dotsync push` to share them.")
+    else:
+        say("Done. This Mac is in sync.")
+
+
+def cmd_apply(args):
+    apply(Tracked.load())
+    say("Done.")
+
+
+def cmd_status(args):
+    tracked = Tracked.load()
+    capture(tracked)
+    changes = git("status", "--porcelain", "--", *OWNED_PATHS).stdout.strip()
+    if not changes:
+        say("This Mac's settings match the repo.")
+        return
+    say("This Mac's settings that differ from the repo (`dotsync push` will save them):")
+    print(git("--no-pager", "diff", "--no-color", "--", "configs/macos", "configs/apps").stdout)
+    print(changes)
+
+
+def snapshot_all_defaults():
+    domains = [(d.strip(), False) for d in run(["defaults", "domains"]).stdout.split(",")]
+    domains += [(d.strip(), True) for d in run(["defaults", "-currentHost", "domains"]).stdout.split(",")]
+    domains += [("NSGlobalDomain", False), ("NSGlobalDomain", True)]
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        values = pool.map(lambda d: read_domain(*d), domains)
+    return dict(zip(domains, values))
+
+
+def cmd_track(args):
+    say("Taking a snapshot of all macOS settings…")
+    before = snapshot_all_defaults()
+    input(f"\nNow change the setting(s) in System Settings or the app, then press {BOLD}Enter{RESET}… ")
+    say("Comparing…")
+    after = snapshot_all_defaults()
+
+    already = {(d, k, h) for d, k, h in Tracked.load().defaults}
+    found = []
+    for (domain, current_host), new in after.items():
+        old = before.get((domain, current_host), {})
+        for key in sorted(set(old) | set(new)):
+            if not same_value(old.get(key), new.get(key)) and (domain, key, current_host) not in already:
+                found.append((domain, key, current_host, old.get(key), new.get(key)))
+    if not found:
+        say("No new changes found. (App settings stored in JSON files need a `json` line in tracked.conf.)")
+        return
+
+    lines = []
+    for domain, key, current_host, old, new in found:
+        show = lambda v: "unset" if v is None else json.dumps(to_json(v))[:50]
+        label = f"{domain}{' (this Mac only)' if current_host else ''}  {key}: {show(old)} → {show(new)}"
+        if ask(f"Track {label}?"):
+            kind = "defaults-host" if current_host else "defaults"
+            name = "-g" if domain == "NSGlobalDomain" else domain
+            lines.append(f"{kind} {shlex.quote(name)} {shlex.quote(key)}")
+    if lines:
+        with TRACKED.open("a") as file:
+            file.write("\n# Added by `dotsync track`\n" + "\n".join(lines) + "\n")
+        say(f"Added {len(lines)} setting(s) to sync/tracked.conf. Run `dotsync push` to share them.")
+
+
+def main():
+    parser = argparse.ArgumentParser(prog="dotsync", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    commands = parser.add_subparsers(dest="command", required=True)
+    push = commands.add_parser("push", help="save this Mac's settings and push them to main")
+    pull = commands.add_parser("pull", help="get main's settings and apply them here")
+    for command in (push, pull):
+        command.add_argument("--no-apply", action="store_true", help="merge only; don't change this Mac's settings")
+    commands.add_parser("apply", help="apply configs/ to this Mac without touching git")
+    commands.add_parser("status", help="show this Mac's settings that differ from the repo")
+    commands.add_parser("track", help="find and track a setting you're about to change")
+    args = parser.parse_args()
+    sys.stdout.reconfigure(line_buffering=True)  # keep our output in order with git/claude output
+    if sys.platform != "darwin":
+        die("dotsync only runs on macOS.")
+    {"push": cmd_push, "pull": cmd_pull, "apply": cmd_apply, "status": cmd_status, "track": cmd_track}[args.command](args)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print()
+        sys.exit(130)
