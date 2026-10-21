@@ -29,8 +29,16 @@ for script_path in "${scripts_to_source[@]}"; do
 done
 
 aliases=(
+  "alias -='cd -'"
+  "alias ...='cd ../..'"
+  "alias ....='cd ../../..'"
+  "alias .....='cd ../../../..'"
+  "alias ......='cd ../../../../..'"
   "alias gs=\"git status\""
   "alias gd=\"git diff\""
+  "alias gaa=\"git add --all\""
+  "alias gco=\"git checkout\""
+  "alias gcmsg=\"git commit -m\""
   "alias gcm=\"gcmsg\""
   "alias gco-=\"gco -\""
   "alias gbl=\"git branch --sort=-committerdate | fzf --height 40% --reverse --ansi | sed 's/^[* ]*//' | xargs -I {} git checkout {}\""
