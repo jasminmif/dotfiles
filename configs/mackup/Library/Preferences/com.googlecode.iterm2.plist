@@ -77,9 +77,9 @@
 	<key>NSWindow Frame SUUpdateAlert</key>
 	<string>446 410 620 402 0 0 1512 949 </string>
 	<key>NSWindow Frame iTerm Profile  0</key>
-	<string>151 123 1211 704 0 0 1512 949 </string>
+	<string>76 48 1355 854 0 0 1512 949 </string>
 	<key>NSWindow Frame iTerm Profile A96E52C8-8714-4106-8BD3-C1CA45A646D0 0</key>
-	<string>76 48 1361 854 0 0 1512 949 </string>
+	<string>76 48 1355 854 0 0 1512 949 </string>
 	<key>NSWindow Frame iTerm Profile AFF8BD33-71E2-42E2-82CF-8F662024561F 0</key>
 	<string>76 48 1361 854 0 0 1512 949 </string>
 	<key>NSWindow Frame iTerm Window 0</key>
@@ -1926,13 +1926,13 @@
 	<key>NoSyncKeyCode0MitigationDisabled_AFF8BD33-71E2-42E2-82CF-8F662024561F</key>
 	<true/>
 	<key>NoSyncLastOSVersion</key>
-	<string>Version 26.6.2 (Build 25G83)</string>
+	<string>Version 27.0.1 (Build 26A434)</string>
 	<key>NoSyncLastShutdownWasClean</key>
 	<false/>
 	<key>NoSyncLastSystemPythonVersionRequirement</key>
 	<string>1.17</string>
 	<key>NoSyncLaunchExperienceControllerRunCount</key>
-	<integer>13</integer>
+	<integer>15</integer>
 	<key>NoSyncMigratedDynamicProfileTagToFlag</key>
 	<true/>
 	<key>NoSyncNextAnnoyanceTime</key>
@@ -1942,7 +1942,7 @@
 	<key>NoSyncPersistentRateLimitedUpdates</key>
 	<dict>
 		<key>CheckForUpdatedUv</key>
-		<real>814315351.05614901</real>
+		<real>814495383.25926995</real>
 	</dict>
 	<key>NoSyncRecordedVariables</key>
 	<dict>
@@ -2874,14 +2874,30 @@
 				<key>nonterminalContext</key>
 				<integer>0</integer>
 			</dict>
+			<dict>
+				<key>isTerminal</key>
+				<true/>
+				<key>name</key>
+				<string>currentTab.currentSession.foregroundJobAncestors</string>
+				<key>nonterminalContext</key>
+				<integer>0</integer>
+			</dict>
 		</array>
 		<key>2</key>
 		<array>
 			<dict>
 				<key>isTerminal</key>
+				<false/>
+				<key>name</key>
+				<string>currentSession</string>
+				<key>nonterminalContext</key>
+				<integer>1</integer>
+			</dict>
+			<dict>
+				<key>isTerminal</key>
 				<true/>
 				<key>name</key>
-				<string>tmuxWindow</string>
+				<string>currentSession.deepestJob</string>
 				<key>nonterminalContext</key>
 				<integer>0</integer>
 			</dict>
@@ -2889,7 +2905,7 @@
 				<key>isTerminal</key>
 				<true/>
 				<key>name</key>
-				<string>currentSession.deepestJob</string>
+				<string>currentSession.terminalWindowName</string>
 				<key>nonterminalContext</key>
 				<integer>0</integer>
 			</dict>
@@ -2922,6 +2938,14 @@
 				<true/>
 				<key>name</key>
 				<string>tmuxWindowTitle</string>
+				<key>nonterminalContext</key>
+				<integer>0</integer>
+			</dict>
+			<dict>
+				<key>isTerminal</key>
+				<true/>
+				<key>name</key>
+				<string>currentSession.terminalIconName</string>
 				<key>nonterminalContext</key>
 				<integer>0</integer>
 			</dict>
@@ -3097,6 +3121,14 @@
 				<key>isTerminal</key>
 				<true/>
 				<key>name</key>
+				<string>tmuxWindow</string>
+				<key>nonterminalContext</key>
+				<integer>0</integer>
+			</dict>
+			<dict>
+				<key>isTerminal</key>
+				<true/>
+				<key>name</key>
 				<string>currentSession.path</string>
 				<key>nonterminalContext</key>
 				<integer>0</integer>
@@ -3109,41 +3141,9 @@
 				<key>nonterminalContext</key>
 				<integer>0</integer>
 			</dict>
-			<dict>
-				<key>isTerminal</key>
-				<false/>
-				<key>name</key>
-				<string>currentSession</string>
-				<key>nonterminalContext</key>
-				<integer>1</integer>
-			</dict>
 		</array>
 		<key>4</key>
 		<array>
-			<dict>
-				<key>isTerminal</key>
-				<true/>
-				<key>name</key>
-				<string>localhostName</string>
-				<key>nonterminalContext</key>
-				<integer>0</integer>
-			</dict>
-			<dict>
-				<key>isTerminal</key>
-				<true/>
-				<key>name</key>
-				<string>effectiveTheme</string>
-				<key>nonterminalContext</key>
-				<integer>0</integer>
-			</dict>
-			<dict>
-				<key>isTerminal</key>
-				<true/>
-				<key>name</key>
-				<string>waitingSessionCount</string>
-				<key>nonterminalContext</key>
-				<integer>0</integer>
-			</dict>
 			<dict>
 				<key>isTerminal</key>
 				<true/>
@@ -3164,7 +3164,31 @@
 				<key>isTerminal</key>
 				<true/>
 				<key>name</key>
+				<string>waitingSessionCount</string>
+				<key>nonterminalContext</key>
+				<integer>0</integer>
+			</dict>
+			<dict>
+				<key>isTerminal</key>
+				<true/>
+				<key>name</key>
 				<string>workingSessionCount</string>
+				<key>nonterminalContext</key>
+				<integer>0</integer>
+			</dict>
+			<dict>
+				<key>isTerminal</key>
+				<true/>
+				<key>name</key>
+				<string>localhostName</string>
+				<key>nonterminalContext</key>
+				<integer>0</integer>
+			</dict>
+			<dict>
+				<key>isTerminal</key>
+				<true/>
+				<key>name</key>
+				<string>effectiveTheme</string>
 				<key>nonterminalContext</key>
 				<integer>0</integer>
 			</dict>
@@ -3177,7 +3201,7 @@
 	<key>NoSyncSavedWindowPositions</key>
 	<dict>
 		<key> 0</key>
-		<string>{151, 827}</string>
+		<string>{76, 902}</string>
 		<key>A96E52C8-8714-4106-8BD3-C1CA45A646D0 0</key>
 		<string>{76, 902}</string>
 		<key>AFF8BD33-71E2-42E2-82CF-8F662024561F 0</key>
@@ -3193,6 +3217,8 @@
 	<dict>
 		<key>mask_15_tv_1_os_26_6_scale_2.0</key>
 		<real>13</real>
+		<key>mask_15_tv_1_os_27_0_scale_2.0</key>
+		<real>16.25</real>
 	</dict>
 	<key>NoSyncWindowRestoresWorkspaceAtLaunch</key>
 	<false/>
@@ -3209,7 +3235,7 @@
 	<key>SUHasLaunchedBefore</key>
 	<true/>
 	<key>SULastCheckTime</key>
-	<date>2026-10-20T22:42:17Z</date>
+	<date>2026-10-23T00:43:03Z</date>
 	<key>SUSendProfileInfo</key>
 	<false/>
 	<key>SUUpdateGroupIdentifier</key>
